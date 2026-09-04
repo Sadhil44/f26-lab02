@@ -36,7 +36,40 @@ green once you fix it.
 
 See the Lab 2 handout on the course page for the three milestones you show a TA.
 
-## Milestone 2: why the generated suite stayed green over a real bug
+## Milestone 1: the stronger property and its failing sample
+
+The provided `freeSlotsNeverOverlapABooking` only checks that returned slots are
+genuinely free; it says nothing about free time the calculator fails to return, so an
+empty (or truncated) result list passes it trivially. `everyMinuteIsBookedXorFree`
+in `AvailabilityProperties.java` pins down full correctness instead: every minute of
+`[dayStart, dayEnd)` must be booked or reported free, never both, never neither.
+
+Run against the pre-fix calculator, jqwik shrinks the failure to:
+
+```
+Scenario[dayStart=0, dayEnd=1, bookings=[]]
+```
+
+For this input `freeSlots(0, 1, [])` returned `[]` instead of `[TimeInterval(0, 1)]`.
+
+- `freeSlotsNeverOverlapABooking` still passes on it: with zero returned slots there is
+  nothing to overlap a booking, so the assertion holds vacuously.
+- `everyMinuteIsBookedXorFree` fails: minute 0 is not covered by any booking and is not
+  covered by any returned slot either, so `booked ^ reportedFree` is `false ^ false`,
+  violating the "exactly one holds" invariant.
+
+## Milestone 2: fix the bug
+
+`freeSlots` merged bookings into free gaps as it walked the sorted, clipped booking
+list, but nothing ran after that loop to flush the gap between the last booking's end
+(or `dayStart`, if there were no bookings at all) and `dayEnd`. On the Milestone 1
+sample this meant the entire day was silently dropped instead of reported free.
+
+Pushing the property alone (commit `3fb3f26`) turned CI red; adding the missing flush
+step after the loop (commit `35b4a43`) turned it green again, without weakening the
+property.
+
+## Milestone 3: why the generated suite stayed green over a real bug
 
 `AvailabilityCalculator.freeSlots` never emitted the free interval between the last
 booking's end (or `dayStart`, if there were no bookings) and `dayEnd` — nothing ran
@@ -75,5 +108,5 @@ both, never neither — instead of checking specific input/output pairs.
 ## Tools used
 
 Claude Code (Sonnet 5, model id `claude-sonnet-5`) was used to write the
-`everyMinuteIsBookedXorFree` property, diagnose and fix the `freeSlots` bug it found,
-and draft this writeup.
+`everyMinuteIsBookedXorFree` property, reproduce its shrunk failing sample, diagnose
+and fix the `freeSlots` bug it found, and draft the Milestone 1-3 writeups.
