@@ -35,3 +35,45 @@ green once you fix it.
 - Setup: `SETUP.md`
 
 See the Lab 2 handout on the course page for the three milestones you show a TA.
+
+## Milestone 2: why the generated suite stayed green over a real bug
+
+`AvailabilityCalculator.freeSlots` never emitted the free interval between the last
+booking's end (or `dayStart`, if there were no bookings) and `dayEnd` — nothing ran
+after the merge loop to flush that trailing gap. `AvailabilityCalculatorTest` had 100%
+JaCoCo instruction and branch coverage and stayed green through it anyway. Three
+concrete weaknesses:
+
+1. **Controllability gap.** No test ever calls `freeSlots` with an empty bookings list.
+   The bug's simplest trigger — `freeSlots(dayStart, dayEnd, List.of())`, which should
+   return the whole day as one free slot — is never constructed.
+2. **Controllability gap.** In every test that does supply bookings
+   (`fullyBookedDayHasNoFreeSlots`, `bookingUntilEndOfDayLeavesTheMorningFree`,
+   `gapsBetweenBookingsAreReturned`, `unsortedBookingsAreHandled`,
+   `overlappingBookingsAreMerged`), the last booking after merging ends exactly at
+   `dayEnd`. So `cursor` always reaches `dayEnd` by the end of the loop, and the
+   missing flush step is a no-op on every one of these inputs — the exact state that
+   would expose it is never driven.
+3. **Observability gap.** `returnedSlotsNeverOverlapABooking` does drive the right
+   input (a booking `(600, 660)` that ends before `dayEnd = 1020`, so the trailing gap
+   really is dropped), but its assertion only checks that returned slots don't overlap
+   the booking. That's satisfied just as well by an empty or truncated free list as by
+   a correct one, so even though the buggy code path ran, the assertion couldn't see
+   that a slot was missing.
+
+High coverage didn't save the suite because coverage measures whether the lines and
+branches *that exist* executed — it has nothing to say about a missing statement.
+Weaknesses 1 and 2 mean the trailing-flush code path was never a required behavior for
+any test input (an omission, not a wrong branch, so there was no line for coverage to
+miss). Weakness 3 shows that even landing on the right input isn't enough without an
+assertion strong enough to detect the deviation. The property-based test that catches
+this, `AvailabilityProperties.everyMinuteIsBookedXorFree`, closes both gaps at once: it
+generates day/booking combinations at random (so it isn't limited to "nice" boundary
+cases) and asserts a completeness invariant — every minute is booked or free, never
+both, never neither — instead of checking specific input/output pairs.
+
+## Tools used
+
+Claude Code (Sonnet 5, model id `claude-sonnet-5`) was used to write the
+`everyMinuteIsBookedXorFree` property, diagnose and fix the `freeSlots` bug it found,
+and draft this writeup.
